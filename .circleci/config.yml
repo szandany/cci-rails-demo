@@ -183,29 +183,29 @@ workflows:
       #     requires:
       #       - build-node-environment
 
-  build-application-artifact-and-deployable-image:
-    jobs:
-      - build-ruby-environment:
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /(\w+-\d+.\d+\d+.\d+T\d+)
+  # build-application-artifact-and-deployable-image:
+  #   jobs:
+  #     - build-ruby-environment:
+  #         filters:
+  #           branches:
+  #             ignore: /.*/
+  #           tags:
+  #             only: /(\w+-\d+.\d+\d+.\d+T\d+)
       # - build-node-environment:
       #     filters:
       #       branches:
       #         ignore: /.*/
       #       tags:
       #         only: /(\w+-\d+.\d+\d+.\d+T\d+)
-      - precompile-asset-files:
-          requires:
-            - build-ruby-environment
-            - build-node-environment
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /(\w+-\d+.\d+\d+.\d+T\d+)
+      # - precompile-asset-files:
+      #     requires:
+      #       - build-ruby-environment
+      #       - build-node-environment
+      #     filters:
+      #       branches:
+      #         ignore: /.*/
+      #       tags:
+      #         only: /(\w+-\d+.\d+\d+.\d+T\d+)
       # - upload-artifacts:
       #     context: deployment-context
       #     requires:
