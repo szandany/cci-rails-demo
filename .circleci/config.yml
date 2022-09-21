@@ -170,18 +170,18 @@ workflows:
               only: /.*/
             tags:
               ignore: /.*/
-      - build-node-environment:
-          filters:
-            branches:
-              only: /.*/
-            tags:
-              ignore: /.*/
+      # - build-node-environment:
+      #     filters:
+      #       branches:
+      #         only: /.*/
+      #       tags:
+      #         ignore: /.*/
       - test-ruby:
           requires:
             - build-ruby-environment
-      - test-node:
-          requires:
-            - build-node-environment
+      # - test-node:
+      #     requires:
+      #       - build-node-environment
 
   build-application-artifact-and-deployable-image:
     jobs:
@@ -191,12 +191,12 @@ workflows:
               ignore: /.*/
             tags:
               only: /(\w+-\d+.\d+\d+.\d+T\d+)
-      - build-node-environment:
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /(\w+-\d+.\d+\d+.\d+T\d+)
+      # - build-node-environment:
+      #     filters:
+      #       branches:
+      #         ignore: /.*/
+      #       tags:
+      #         only: /(\w+-\d+.\d+\d+.\d+T\d+)
       - precompile-asset-files:
           requires:
             - build-ruby-environment
@@ -206,21 +206,21 @@ workflows:
               ignore: /.*/
             tags:
               only: /(\w+-\d+.\d+\d+.\d+T\d+)
-      - upload-artifacts:
-          context: deployment-context
-          requires:
-            - precompile-asset-files
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /(\w+-\d+.\d+\d+.\d+T\d+)
-      - build-image-and-push-to-ecr:
-          context: deployment-context
-          requires:
-            - upload-artifacts
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /(\w+-\d+.\d+\d+.\d+T\d+)
+      # - upload-artifacts:
+      #     context: deployment-context
+      #     requires:
+      #       - precompile-asset-files
+      #     filters:
+      #       branches:
+      #         ignore: /.*/
+      #       tags:
+      #         only: /(\w+-\d+.\d+\d+.\d+T\d+)
+      # - build-image-and-push-to-ecr:
+      #     context: deployment-context
+      #     requires:
+      #       - upload-artifacts
+      #     filters:
+      #       branches:
+      #         ignore: /.*/
+      #       tags:
+      #         only: /(\w+-\d+.\d+\d+.\d+T\d+)
