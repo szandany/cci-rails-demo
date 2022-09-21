@@ -82,7 +82,7 @@ jobs:
   test-ruby:
     resource_class: large
     docker:
-      - image: img/ruby:3.1.2
+      - image: cimg/ruby:3.1.2
       - environment:
           POSTGRES_DB: monolith_test
           POSTGRES_PASSWORD: "password"
