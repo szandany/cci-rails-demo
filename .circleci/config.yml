@@ -1,0 +1,226 @@
+version: 2.1
+
+orbs:
+  ruby: circleci/ruby@1.7.1
+  node: circleci/node@5.0.2
+  aws-s3: circleci/aws-s3@3.0.0
+  aws-ecr: circleci/aws-ecr@8.1.2
+
+executors:
+  ruby-executor:
+    docker:
+      - image: cimg/ruby:2.6.6-node
+  node-executor:
+    docker:
+      - image: cimg/node:14.16.0-browsers
+
+commands:
+  build-ruby-dependencies:
+    description: Installs vendor libraries and dependencies for Ruby
+    steps:
+      - run:
+          command: |
+              gem install bundler:1.17.3
+              bundle config --local enterprise.contribsys.com ${BUNDLE_GEMS__CONTRIBSYS__COM}
+              bundle config --local with "test development staging"
+      - ruby/install-deps
+
+  build-node-dependencies:
+    description: Installs vendor libraries and dependencies for Node
+    steps:
+      - node/install-packages:
+          pkg-manager: yarn
+
+  precompile-assets:
+    description: Precompiles assets such as js, css, tsx
+    steps:
+      - run: RAILS_ENV=development bundle exec rake assets:precompile --trace
+      - save_cache:
+          key: asset-cache-{{ arch }}-{{ .Branch }}
+          paths:
+            - public/assets
+            - tmp/cache/webpacker
+
+  restore-artifacts:
+    description: restore cache from the Artifacts
+    steps:
+      - restore_cache:
+          keys:
+            - bundle-cache-{{ .Branch }}-{{ checksum "Gemfile.lock" }}
+      - restore_cache:
+          keys:
+            - bundle-cache-{{ .Branch }}-{{ checksum "yarn.lock" }}
+      - restore_cache:
+          keys:
+          - asset-cache-{{ arch }}-{{ .Branch }}
+
+  rubocop:
+    description: Rubocop checks
+    steps:
+      - run:
+          name: Rubocop
+          command: |
+            git fetch --all > /dev/null
+            CHANGED_FILES=$(git diff-tree -r --no-commit-id --name-only \
+              $(git merge-base origin/$SOURCE_BRANCH HEAD) HEAD --diff-filter d)
+            RUBY_CHANGES=`echo "$CHANGED_FILES" | grep ".rb" | grep -v "db/schema.rb" || true`
+            bundle exec rubocop `echo $RUBY_CHANGES | tr '\n' ' '`
+
+jobs:
+  build-ruby-environment:
+    executor: ruby-executor
+    steps:
+      - checkout
+      - build-ruby-dependencies
+
+  build-node-environment:
+    executor: node-executor
+    steps:
+      - checkout
+      - build-node-dependencies
+
+  test-ruby:
+    resource_class: large
+    docker:
+      - image: cimg/ruby:2.6.6-node
+      - environment:
+          POSTGRES_DB: monolith_test
+          POSTGRES_PASSWORD: "password"
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        image: negotiatus/docker-postgres-plv8:12.6-2.3
+      - image: cimg/redis:6.2.6
+    environment:
+      BUNDLE_JOBS: "3"
+      BUNDLE_RETRY: "3"
+      PGHOST: 127.0.0.1
+      PGPASSWORD: ""
+      PGUSER: postgres
+      RAILS_ENV: test
+    # parallelism: 12
+    steps:
+      - checkout
+      - build-ruby-dependencies
+      - run:
+          name: Wait for DB
+          command: "dockerize -wait tcp://localhost:5432 -timeout 1m"
+      - run:
+          name: Database setup
+          command: "bundle exec rake db:create db:schema:load --trace"
+      # - ruby/rspec-test:
+      #     include: spec/**/*_spec.rb
+      # - rubocop
+
+  test-node:
+    executor: node-executor
+    steps:
+      - checkout
+      - build-node-dependencies
+      - run:
+          name: Jest tests
+          command: yarn jest --ci --runInBand
+      - run:
+          name: ESLint
+          command: yarn lint
+
+  precompile-asset-files:
+    executor: ruby-executor
+    resource_class: large
+    steps:
+      - checkout
+      - build-ruby-dependencies
+      - build-node-dependencies
+      - precompile-assets
+
+  upload-artifacts:
+    executor: ruby-executor
+    resource_class: medium+
+    steps:
+      - checkout
+      - restore-artifacts
+      - run: echo "export DATETIME=`date +%Y-%m-%dT%H:%M:%S:%z`" >> $BASH_ENV
+      - run:
+          command: tar --exclude='.git' --exclude='.vscode' --exclude='.github' --exclude='.buildkite' --exclude='.circleci' --exclude='spec' -cvzf ../${CIRCLE_SHA1}-${DATETIME}.tar.gz /home/circleci/project
+      - aws-s3/copy:
+          from: ../${CIRCLE_SHA1}-${DATETIME}.tar.gz
+          to: "s3://monolith-application-artifacts"
+
+  build-image-and-push-to-ecr:
+    executor: aws-ecr/default
+    steps:
+      - checkout
+      - restore-artifacts
+      - aws-ecr/build-and-push-image:
+          aws-access-key-id: AWS_ACCESS_KEY_ID
+          aws-secret-access-key: AWS_SECRET_ACCESS_KEY
+          region: ${AWS_DEFAULT_REGION}
+          registry-id: AWS_ACCOUNT_ID
+          role-arn: USER_ROLE_ARN
+          dockerfile: Dockerfile.circleci
+          repo: "monolith"
+          tag: monolith-${CIRCLE_TAG}-${CIRCLE_SHA1}
+          extra-build-args: '--build-arg APP_VERSION=$CIRCLE_SHA1'
+
+workflows:
+  build-environments:
+    jobs:
+      - build-ruby-environment:
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              ignore: /.*/
+      - build-node-environment:
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              ignore: /.*/
+      - test-ruby:
+          requires:
+            - build-ruby-environment
+      - test-node:
+          requires:
+            - build-node-environment
+
+  build-application-artifact-and-deployable-image:
+    jobs:
+      - build-ruby-environment:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /(\w+-\d+.\d+\d+.\d+T\d+)
+      - build-node-environment:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /(\w+-\d+.\d+\d+.\d+T\d+)
+      - precompile-asset-files:
+          requires:
+            - build-ruby-environment
+            - build-node-environment
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /(\w+-\d+.\d+\d+.\d+T\d+)
+      - upload-artifacts:
+          context: deployment-context
+          requires:
+            - precompile-asset-files
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /(\w+-\d+.\d+\d+.\d+T\d+)
+      - build-image-and-push-to-ecr:
+          context: deployment-context
+          requires:
+            - upload-artifacts
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /(\w+-\d+.\d+\d+.\d+T\d+)
